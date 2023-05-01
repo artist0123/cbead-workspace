@@ -71,6 +71,7 @@ app.post("/workspaces", (req, res) => {
       available,
       equipment: [],
       price,
+      rentedTimeSlots: [],
     },
   };
 
@@ -202,6 +203,85 @@ app.post("/workspaces/:id/rent", async (req, res) => {
     res.json({ ...workspaceData.Attributes, totalPrice });
   } catch (error) {
     res.status(500).json({ error: "Error renting workspace" });
+  }
+});
+
+// Rent a time slot for a workspace
+app.post("/workspaces/:id/rent-time-slot", async (req, res) => {
+  const { startTime, endTime, paymentInfo, userId } = req.body;
+
+  const isValidDateTime = (dateTime) => {
+    const regex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+    return regex.test(dateTime);
+  };
+  
+  // Validate startTime and endTime format (e.g., "2023-05-01T10:00:00" and "2023-05-01T12:00:00")
+  if (!isValidDateTime(startTime) || !isValidDateTime(endTime)) {
+    res.status(400).json({ error: "Invalid startTime or endTime format" });
+    return;
+  }
+
+  // Check if the time slot is available
+  const workspaceParams = {
+    TableName: tableName,
+    Key: {
+      id: req.params.id,
+    },
+  };
+
+  try {
+    const workspaceData = await dynamoDb.get(workspaceParams).promise();
+    const rentedTimeSlots = workspaceData.Item.rentedTimeSlots || [];
+
+    // Check if the requested time slot is available
+    const isTimeSlotAvailable = rentedTimeSlots.every(
+      (slot) => slot.endTime <= startTime || slot.startTime >= endTime
+    );
+
+    if (!isTimeSlotAvailable) {
+      res.status(400).json({ error: "Time slot is not available" });
+      return;
+    }
+
+    // Calculate the price for the rented time slot
+    const hours = (new Date(endTime) - new Date(startTime)) / 3600000;
+    const totalPrice = workspaceData.Item.price * hours;
+
+    // Process the payment
+    const paymentSuccess = processPayment(totalPrice, paymentInfo);
+
+    // Save the payment record
+    const paymentRecord = await savePaymentRecord(
+      totalPrice,
+      userId,
+      req.params.id,
+      null,
+      null,
+      paymentSuccess ? "success" : "failed"
+    );
+
+    if (!paymentSuccess) {
+      res.status(400).json({ error: "Payment failed", paymentRecord });
+      return;
+    }
+
+    // Save the rented time slot
+    rentedTimeSlots.push({ startTime, endTime, userId });
+    const updateParams = {
+      TableName: tableName,
+      Key: {
+        id: req.params.id,
+      },
+      UpdateExpression: "SET rentedTimeSlots = :rentedTimeSlots",
+      ExpressionAttributeValues: {
+        ":rentedTimeSlots": rentedTimeSlots,
+      },
+    };
+
+    await dynamoDb.update(updateParams).promise();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Error renting time slot" });
   }
 });
 
