@@ -32,7 +32,7 @@ app.get("/workspaces", (req, res) => {
 
   dynamoDb.scan(params, (error, data) => {
     if (error) {
-      res.status(500).json({ error: "Error fetching workspaces" });
+      res.status(500).json({ error: "Error fetching workspaces " + error });
     } else {
       res.json(data.Items);
     }
@@ -50,7 +50,7 @@ app.get("/workspaces/:id", (req, res) => {
 
   dynamoDb.get(params, (error, data) => {
     if (error) {
-      res.status(500).json({ error: "Error fetching workspace" });
+      res.status(500).json({ error: "Error fetching workspace " + error });
     } else {
       res.json(data.Item);
     }
@@ -77,7 +77,7 @@ app.post("/workspaces", (req, res) => {
 
   dynamoDb.put(params, (error) => {
     if (error) {
-      res.status(500).json({ error: "Error adding workspace" });
+      res.status(500).json({ error: "Error adding workspace " + error });
     } else {
       res.json(params.Item);
     }
@@ -108,7 +108,7 @@ app.put("/workspaces/:id", (req, res) => {
 
   dynamoDb.update(params, (error, data) => {
     if (error) {
-      res.status(500).json({ error: "Error updating workspace" });
+      res.status(500).json({ error: "Error updating workspace " + error });
     } else {
       res.json(data.Attributes);
     }
@@ -126,7 +126,7 @@ app.delete("/workspaces/:id", (req, res) => {
 
   dynamoDb.delete(params, (error) => {
     if (error) {
-      res.status(500).json({ error: "Error deleting workspace" });
+      res.status(500).json({ error: "Error deleting workspace " + error });
     } else {
       res.json({ success: true });
     }
@@ -214,7 +214,7 @@ app.post("/workspaces/:id/rent-time-slot", async (req, res) => {
     const regex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
     return regex.test(dateTime);
   };
-  
+
   // Validate startTime and endTime format (e.g., "2023-05-01T10:00:00" and "2023-05-01T12:00:00")
   if (!isValidDateTime(startTime) || !isValidDateTime(endTime)) {
     res.status(400).json({ error: "Invalid startTime or endTime format" });
@@ -281,7 +281,7 @@ app.post("/workspaces/:id/rent-time-slot", async (req, res) => {
     await dynamoDb.update(updateParams).promise();
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: "Error renting time slot" });
+    res.status(500).json({ error: "Error renting time slot " + error });
   }
 });
 
