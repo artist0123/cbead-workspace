@@ -20,6 +20,63 @@ AWS.config.update({
 
 const tableName = "workspaces";
 
+app.get("/workspaces", async (req, res) => {
+  const params = {
+    TableName: tableName, // Replace with your actual DynamoDB table name
+  };
+
+  try {
+    const data = await ddb.scan(params).promise();
+    res.json(data.Items);
+  } catch (err) {
+    res.status(500).json({ error: err.toString() });
+  }
+});
+
+app.get("/workspaceById", async (req, res) => {
+  const id = req.query.id;
+
+  const params = {
+    TableName: tableName, // Replace with your actual DynamoDB table name
+    KeyConditionExpression: "#id = :id",
+    ExpressionAttributeNames: {
+      "#id": "id",
+    },
+    ExpressionAttributeValues: {
+      ":id": id,
+    },
+  };
+
+  try {
+    const data = await ddb.query(params).promise();
+    res.json(data.Items[0]); // Assuming that id is unique
+  } catch (err) {
+    res.status(500).json({ error: err.toString() });
+  }
+});
+
+app.get("/workspacesByType", async (req, res) => {
+  const roomType = req.query.roomType;
+
+  const params = {
+    TableName: tableName, // Replace with your actual DynamoDB table name
+    FilterExpression: "#room_type = :room_type",
+    ExpressionAttributeNames: {
+      "#room_type": "room_type",
+    },
+    ExpressionAttributeValues: {
+      ":room_type": roomType,
+    },
+  };
+
+  try {
+    const data = await ddb.scan(params).promise();
+    res.json(data.Items);
+  } catch (err) {
+    res.status(500).json({ error: err.toString() });
+  }
+});
+
 app.post("/workspace", async (req, res) => {
   const params = {
     TableName: tableName,
