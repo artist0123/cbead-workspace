@@ -3,13 +3,13 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const AWS = require("aws-sdk");
-const { processPayment, savePaymentRecord } = require("./paymentService");
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(bodyParser.json());
+const ddb = new AWS.DynamoDB.DocumentClient();
 
 AWS.config.update({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -18,103 +18,97 @@ AWS.config.update({
   region: "us-east-1",
 });
 
-const dynamoDb = new AWS.DynamoDB.DocumentClient();
 const tableName = "workspaces";
 
-// Define your API routes here
-// ... (previous code)
-
-// List all workspaces
-app.get("/workspaces", (req, res) => {
-  const params = {
-    TableName: tableName,
-  };
-
-  dynamoDb.scan(params, (error, data) => {
-    if (error) {
-      res.status(500).json({ error: "Error fetching workspaces " + error });
-    } else {
-      res.json(data.Items);
-    }
-  });
-});
-
-// Get a single workspace by ID
-app.get("/workspaces/:id", (req, res) => {
-  const params = {
-    TableName: tableName,
-    Key: {
-      id: req.params.id,
-    },
-  };
-
-  dynamoDb.get(params, (error, data) => {
-    if (error) {
-      res.status(500).json({ error: "Error fetching workspace " + error });
-    } else {
-      res.json(data.Item);
-    }
-  });
-});
-
-// Add a new workspace
-app.post("/workspaces", (req, res) => {
-  const { id, name, capacity, available, price } = req.body;
-
+app.post("/workspace", async (req, res) => {
   const params = {
     TableName: tableName,
     Item: {
-      id,
-      name,
-      capacity,
-      available,
-      equipment: [],
-      price,
-      rentedTimeSlots: [],
+      id: uuidv4(),
+      room_type: req.body.room_type,
+      room_name: req.body.room_name,
+      room_capacity: req.body.room_capacity,
+      desc: req.body.desc,
+      price: req.body.price,
+      status: req.body.status,
+      time_rent: req.body.time_rent,
     },
   };
 
-  dynamoDb.put(params, (error) => {
-    if (error) {
-      res.status(500).json({ error: "Error adding workspace " + error });
-    } else {
-      res.json(params.Item);
-    }
-  });
+  try {
+    await ddb.put(params).promise();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err });
+  }
 });
 
-// Update a workspace
-app.put("/workspaces/:id", (req, res) => {
-  const { name, capacity, available, equipment, price } = req.body;
+app.post("/workspace/onReserveWorkspace", async (req, res) => {
+  const model = req.body;
 
   const params = {
     TableName: tableName,
+    Key: { id: model.roomId },
+    UpdateExpression: "SET status = :s",
+    ExpressionAttributeValues: { ":s": "RESERVED" },
+    ReturnValues: "ALL_NEW",
+  };
+
+  try {
+    const updatedWorkspace = await ddb.update(params).promise();
+    res.status(200).send(true);
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+app.post("/workspace/onCancelReserve", async (req, res) => {
+  const model = req.body;
+
+  const params = {
+    TableName: tableName,
+    Key: { id: model.roomId },
+    UpdateExpression: "SET status = :s",
+    ExpressionAttributeValues: { ":s": "AVAILABLE" },
+    ReturnValues: "ALL_NEW",
+  };
+
+  try {
+    const updatedWorkspace = await ddb.update(params).promise();
+    res.status(200).send(true);
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+app.put("/workspace", async (req, res) => {
+  const params = {
+    TableName: tableName,
     Key: {
-      id: req.params.id,
+      id: req.body.id,
     },
     UpdateExpression:
-      "SET name = :name, capacity = :capacity, available = :available, equipment = :equipment, price = :price",
+      "set room_type = :rt, room_name = :rn, room_capacity = :rc, desc = :d, price = :p, status = :s, time_rent = :tr",
     ExpressionAttributeValues: {
-      ":name": name,
-      ":capacity": capacity,
-      ":available": available,
-      ":equipment": equipment,
-      ":price": price,
+      ":rt": req.body.room_type,
+      ":rn": req.body.room_name,
+      ":rc": req.body.room_capacity,
+      ":d": req.body.desc,
+      ":p": req.body.price,
+      ":s": req.body.status,
+      ":tr": req.body.time_rent,
     },
-    ReturnValues: "ALL_NEW",
   };
 
-  dynamoDb.update(params, (error, data) => {
-    if (error) {
-      res.status(500).json({ error: "Error updating workspace " + error });
-    } else {
-      res.json(data.Attributes);
-    }
-  });
+  try {
+    await ddb.update(params).promise();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err });
+  }
 });
 
-// Delete a workspace
-app.delete("/workspaces/:id", (req, res) => {
+app.delete("/workspace/:id", async (req, res) => {
   const params = {
     TableName: tableName,
     Key: {
@@ -122,168 +116,12 @@ app.delete("/workspaces/:id", (req, res) => {
     },
   };
 
-  dynamoDb.delete(params, (error) => {
-    if (error) {
-      res.status(500).json({ error: "Error deleting workspace " + error });
-    } else {
-      res.json({ success: true });
-    }
-  });
-});
-
-// Rent a time slot for a workspace
-app.post("/workspaces/:id/rent-time-slot", async (req, res) => {
-  const { startTime, endTime, paymentInfo, userId } = req.body;
-
-  const isValidDateTime = (dateTime) => {
-    const regex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
-    return regex.test(dateTime);
-  };
-
-  // Validate startTime and endTime format (e.g., "2023-05-01T10:00:00" and "2023-05-01T12:00:00")
-  if (!isValidDateTime(startTime) || !isValidDateTime(endTime)) {
-    res.status(400).json({ error: "Invalid startTime or endTime format" });
-    return;
-  }
-
-  // Check if the time slot is available
-  const workspaceParams = {
-    TableName: tableName,
-    Key: {
-      id: req.params.id,
-    },
-  };
-
   try {
-    const workspaceData = await dynamoDb.get(workspaceParams).promise();
-    const rentedTimeSlots = workspaceData.Item.rentedTimeSlots || [];
-
-    // Check if the requested time slot is available
-    const isTimeSlotAvailable = rentedTimeSlots.every(
-      (slot) => slot.endTime <= startTime || slot.startTime >= endTime
-    );
-
-    if (!isTimeSlotAvailable) {
-      res.status(400).json({ error: "Time slot is not available" });
-      return;
-    }
-
-    // Calculate the price for the rented time slot
-    const hours = (new Date(endTime) - new Date(startTime)) / 3600000;
-    const totalPrice = workspaceData.Item.price * hours;
-
-    // Process the payment
-    const paymentSuccess = processPayment(totalPrice, paymentInfo);
-
-    // Save the payment record
-    const paymentRecord = await savePaymentRecord(
-      totalPrice,
-      userId,
-      req.params.id,
-      null,
-      null,
-      paymentSuccess ? "success" : "failed"
-    );
-
-    if (!paymentSuccess) {
-      res.status(400).json({ error: "Payment failed", paymentRecord });
-      return;
-    }
-
-    // Save the rented time slot
-    rentedTimeSlots.push({ startTime, endTime, userId });
-    const updateParams = {
-      TableName: tableName,
-      Key: {
-        id: req.params.id,
-      },
-      UpdateExpression: "SET rentedTimeSlots = :rentedTimeSlots",
-      ExpressionAttributeValues: {
-        ":rentedTimeSlots": rentedTimeSlots,
-      },
-    };
-
-    await dynamoDb.update(updateParams).promise();
+    await ddb.delete(params).promise();
     res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: "Error renting time slot " + error });
+  } catch (err) {
+    res.status(500).json({ error: err });
   }
 });
 
-// Rent a workspace
-app.post("/workspaces/:id/rent", async (req, res) => {
-  const { rentEquipment, paymentInfo, lateFine, userId } = req.body;
-
-  // Update the workspace availability
-  const workspaceParams = {
-    TableName: tableName,
-    Key: {
-      id: req.params.id,
-    },
-    UpdateExpression: "SET available = :available",
-    ExpressionAttributeValues: {
-      ":available": false,
-    },
-    ReturnValues: "ALL_NEW",
-  };
-
-  try {
-    const workspaceData = await dynamoDb.update(workspaceParams).promise();
-    // Calculate the total price with the late fine if applicable
-    const totalPrice = workspaceData.Attributes.price + (lateFine || 0);
-
-    // Process the payment
-    const paymentSuccess = processPayment(totalPrice, paymentInfo);
-
-    // Save the payment record
-    const paymentRecord = await savePaymentRecord(
-      totalPrice,
-      userId,
-      req.params.id,
-      rentEquipment,
-      lateFine,
-      paymentSuccess ? "success" : "failed"
-    );
-
-    if (!paymentSuccess) {
-      res.status(400).json({ error: "Payment failed", paymentRecord });
-      return;
-    }
-
-    // If rentEquipment is specified, update the availability of the equipment
-    if (
-      rentEquipment &&
-      Array.isArray(rentEquipment) &&
-      rentEquipment.length > 0
-    ) {
-      const updateEquipmentAvailability = async (equipmentId) => {
-        const equipmentParams = {
-          TableName: "equipments",
-          Key: {
-            id: equipmentId,
-          },
-          UpdateExpression: "SET available = :available",
-          ExpressionAttributeValues: {
-            ":available": false,
-          },
-          ReturnValues: "ALL_NEW",
-        };
-
-        const equipmentData = await dynamoDb.update(equipmentParams).promise();
-        totalPrice += equipmentData.Attributes.price;
-      };
-
-      // Update the availability of all specified equipment
-      await Promise.all(rentEquipment.map(updateEquipmentAvailability));
-    }
-
-    res.json({ ...workspaceData.Attributes, totalPrice });
-  } catch (error) {
-    res.status(500).json({ error: "Error renting workspace" });
-  }
-});
-// ... (previous code)
-
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Server is running on port ${port}`);
-});
+app.listen(port, () => console.log("Server is running on port 3000"));
