@@ -3,13 +3,13 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const AWS = require("aws-sdk");
+const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(bodyParser.json());
-const ddb = new AWS.DynamoDB.DocumentClient();
 
 AWS.config.update({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -17,6 +17,7 @@ AWS.config.update({
   sessionToken: process.env.AWS_SESSION_TOKEN,
   region: "us-east-1",
 });
+const ddb = new AWS.DynamoDB.DocumentClient();
 
 const tableName = "workspaces";
 
@@ -33,8 +34,8 @@ app.get("/workspaces", async (req, res) => {
   }
 });
 
-app.get("/workspaceById", async (req, res) => {
-  const id = req.query.id;
+app.get("/workspaces/:id", async (req, res) => {
+  const id = req.params.id;
 
   const params = {
     TableName: tableName, // Replace with your actual DynamoDB table name
@@ -55,8 +56,8 @@ app.get("/workspaceById", async (req, res) => {
   }
 });
 
-app.get("/workspacesByType", async (req, res) => {
-  const roomType = req.query.roomType;
+app.get("/workspaces/:roomType", async (req, res) => {
+  const roomType = req.params.roomType;
 
   const params = {
     TableName: tableName, // Replace with your actual DynamoDB table name
@@ -138,14 +139,18 @@ app.post("/workspace/onCancelReserve", async (req, res) => {
   }
 });
 
-app.put("/workspace", async (req, res) => {
+app.put("/workspace/:id", async (req, res) => {
   const params = {
     TableName: tableName,
     Key: {
-      id: req.body.id,
+      id: req.params.id,
     },
     UpdateExpression:
-      "set room_type = :rt, room_name = :rn, room_capacity = :rc, desc = :d, price = :p, status = :s, time_rent = :tr",
+      "set room_type = :rt, room_name = :rn, room_capacity = :rc, #dsc = :d, price = :p, #stt = :s, time_rent = :tr",
+    ExpressionAttributeNames:{
+      '#dsc' : 'desc',
+      '#stt' : 'status'
+    },
     ExpressionAttributeValues: {
       ":rt": req.body.room_type,
       ":rn": req.body.room_name,
@@ -181,4 +186,4 @@ app.delete("/workspace/:id", async (req, res) => {
   }
 });
 
-app.listen(port, () => console.log("Server is running on port 3000"));
+app.listen(3000, () => console.log("Server is running on port 3000"));
